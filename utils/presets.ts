@@ -228,81 +228,34 @@ function buildFlatRoof(w: number, l: number): PresetConfig {
   return { anchorPoints, poles: polesArr, ropes };
 }
 
-// ─── Adirondack ─────────────────────────────────────────────────────────────
-// Diamond-oriented tarp creating a 45° walled shelter with triangular ground sheet.
-// For a 10'x10' tarp: 45° walls, 5' high, floor space 5' x 7.071'.
-//
-// Setup (diamond orientation - tarp rotated 45°):
-// 1. Bottom triangle (3 corners) pegged to ground as floor
-// 2. Main wall (square EFGH when viewed from above) faces windward at 45°
-// 3. Top corner supported in air on lee side (opening)
-// 4. Left/right side triangles fold inward as partial walls
-//
-// The tarp is oriented as a diamond ABCD with inner square EFGH:
-//   - A (top), B (right), C (bottom), D (left) are the corner points
-//   - E, F, G, H are the midpoints of edges forming the main wall
+// ─── Adirondack (Forester / open-front lean-to) ─────────────────────────────
+// Three-sided shelter: front edge raised on two poles (the *opening*), back
+// edge pegged to the ground. Geometry-wise this is the same fully-tensioned
+// slope as Lean-To, just mirrored across Z so the open side faces the
+// default camera instead of away from it.
 function buildAdirondack(w: number, l: number): PresetConfig {
-  // Use the smaller dimension for the square tarp calculation
-  const S = Math.min(w, l);
-  
-  // For a 45° wall: height = S/2 (half the tarp edge = diagonal/2 of inner square)
-  // Floor depth = S * sqrt(2) / 2 ≈ 0.7071 * S
-  const H = S / 2;                          // Wall height (5' for 10' tarp)
-  const floorDepth = S * Math.SQRT1_2;      // 7.071' for 10' tarp  
-  const floorWidth = S / 2;                 // 5' for 10' tarp
-  
-  // Ridge line height (top of the 45° angled wall)
-  const ridgeHeight = H;
-  
-  // Ground triangle vertices (bottom triangle of diamond)
-  // Point C (bottom of diamond) is at the back
-  // Points at ground level forming the floor
-  const groundBackZ = -floorDepth / 2;
-  const groundFrontZ = floorDepth / 2;
-  
-  // The 9-point grid maps onto the Adirondack structure:
-  // Row 0: Top edge of main wall (ridge line, supported in air)
-  // Row 1: Middle of wall / fold line  
-  // Row 2: Ground level (floor triangle + side fold points)
-  
+  const H  = Math.min(l * 0.5, 1.5);
+  const hh = Math.sqrt(l * l - H * H) / 2;
+  const hw = w / 2;
+
   const anchorPoints = makeAnchors([
-    // Row 0 (top/lee side - opening, supported ridge)
-    [
-      [-floorWidth * 0.7, ridgeHeight * 0.7, groundFrontZ * 0.5],  // r0c0: left upper wall
-      [0, ridgeHeight, groundFrontZ],                               // r0c1: top peak (Point A of diamond)
-      [floorWidth * 0.7, ridgeHeight * 0.7, groundFrontZ * 0.5],   // r0c2: right upper wall
-    ],
-    // Row 1 (middle - main wall plane at 45°)
-    [
-      [-floorWidth, ridgeHeight * 0.5, 0],                         // r1c0: left wall edge (Point D midpoint)
-      [0, ridgeHeight * 0.5, 0],                                   // r1c1: center of main wall
-      [floorWidth, ridgeHeight * 0.5, 0],                          // r1c2: right wall edge (Point B midpoint)
-    ],
-    // Row 2 (ground - floor triangle)
-    [
-      [-floorWidth * 0.5, 0, groundBackZ * 0.5],                   // r2c0: left ground (side fold)
-      [0, 0, groundBackZ],                                         // r2c1: back ground (Point C - windward)
-      [floorWidth * 0.5, 0, groundBackZ * 0.5],                    // r2c2: right ground (side fold)
-    ],
+    [[-hw, H,    hh],  [0, H,    hh],  [hw, H,    hh]],   // front  (HIGH – opening)
+    [[-hw, H/2,  0],   [0, H/2,  0],   [hw, H/2,  0]],    // middle (slope)
+    [[-hw, 0,   -hh],  [0, 0,   -hh],  [hw, 0,   -hh]],   // back   (ground – closed)
   ]);
 
-  // Two poles support the ridge line on the lee (open) side
-  const pLeft:  Pole = { id: uid(), basePosition: [-floorWidth * 0.5, groundFrontZ * 0.8], height: ridgeHeight };
-  const pRight: Pole = { id: uid(), basePosition: [floorWidth * 0.5, groundFrontZ * 0.8], height: ridgeHeight };
+  const pLeft:  Pole = { id: uid(), basePosition: [-hw, hh], height: H };
+  const pRight: Pole = { id: uid(), basePosition: [ hw, hh], height: H };
 
   const ropes: Rope[] = [
-    // Ridge line between poles (supports top edge of shelter opening)
+    // Front opening ridge between the two poles
     { id: uid(), from: { type: 'pole_top', id: pLeft.id }, to: { type: 'pole_top', id: pRight.id } },
-    // Top peak (Point A) connected to ridge
-    { id: uid(), from: { type: 'anchor', id: 'r0c1' }, to: { type: 'pole_top', id: pLeft.id } },
-    { id: uid(), from: { type: 'anchor', id: 'r0c1' }, to: { type: 'pole_top', id: pRight.id } },
-    // Guy lines from poles to ground for stability
-    { id: uid(), from: { type: 'pole_top', id: pLeft.id }, to: { type: 'position', position: [-floorWidth - 0.5, 0, groundFrontZ + 0.5] } },
-    { id: uid(), from: { type: 'pole_top', id: pRight.id }, to: { type: 'position', position: [floorWidth + 0.5, 0, groundFrontZ + 0.5] } },
-    // Ground pegs for floor triangle (windward side - back)
-    { id: uid(), from: { type: 'anchor', id: 'r2c1' }, to: { type: 'position', position: [0, 0, groundBackZ - 0.3] } },
-    { id: uid(), from: { type: 'anchor', id: 'r2c0' }, to: { type: 'position', position: [-floorWidth * 0.5 - 0.3, 0, groundBackZ * 0.5] } },
-    { id: uid(), from: { type: 'anchor', id: 'r2c2' }, to: { type: 'position', position: [floorWidth * 0.5 + 0.3, 0, groundBackZ * 0.5] } },
+    // Front guy-outs forward to keep the poles braced toward the opening
+    { id: uid(), from: { type: 'anchor', id: 'r0c0' }, to: { type: 'position', position: [-hw - 0.7, 0, hh + 0.5] } },
+    { id: uid(), from: { type: 'anchor', id: 'r0c2' }, to: { type: 'position', position: [ hw + 0.7, 0, hh + 0.5] } },
+    // Back ground pegs
+    { id: uid(), from: { type: 'anchor', id: 'r2c0' }, to: { type: 'position', position: [-hw, 0, -hh] } },
+    { id: uid(), from: { type: 'anchor', id: 'r2c2' }, to: { type: 'position', position: [ hw, 0, -hh] } },
   ];
 
   return { anchorPoints, poles: [pLeft, pRight], ropes };
