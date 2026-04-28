@@ -152,11 +152,123 @@ function buildDiamond(w: number, l: number): PresetConfig {
   return { anchorPoints, poles: [pole], ropes };
 }
 
+// ─── Pyramid (Mid) ──────────────────────────────────────────────────────────
+// Single centre pole holds the centre of the tarp; all four corners are pegged
+// to the ground. The cardinal-edge midpoints (r0c1 etc.) are ALSO pegged to
+// the ground so the tarp forms a proper 4-sided pyramid / tipi shape.
+//
+// Geometry constraints (with H ≤ min(w/2, l/2)):
+//     |r1c1 − r0c1|² = H² + d_card_z²   = (l/2)²
+//     |r1c1 − r1c0|² = H² + d_card_x²   = (w/2)²
+//     |r1c1 − r0c0|² = H² + d_corner²    = (w/2)² + (l/2)²
+function buildPyramid(w: number, l: number): PresetConfig {
+  const halfW = w / 2;
+  const halfL = l / 2;
+  const H = Math.min(halfW, halfL) * 0.6;
+
+  const dCardX = Math.sqrt(halfW * halfW - H * H);   // r1c0 / r1c2
+  const dCardZ = Math.sqrt(halfL * halfL - H * H);   // r0c1 / r2c1
+
+  const R = Math.sqrt(halfW * halfW + halfL * halfL);
+  const dCorner = Math.sqrt(R * R - H * H);
+  const cornerX = (dCorner * halfW) / R;
+  const cornerZ = (dCorner * halfL) / R;
+
+  const anchorPoints = makeAnchors([
+    [[-cornerX, 0,  cornerZ], [0, 0,  dCardZ], [cornerX, 0,  cornerZ]],
+    [[-dCardX,  0,  0      ], [0, H,  0     ], [dCardX,  0,  0      ]],
+    [[-cornerX, 0, -cornerZ], [0, 0, -dCardZ], [cornerX, 0, -cornerZ]],
+  ]);
+
+  const pole: Pole = { id: uid(), basePosition: [0, 0], height: H };
+
+  const ropes: Rope[] = [
+    { id: uid(), from: { type: 'anchor', id: 'r1c1' }, to: { type: 'pole_top', id: pole.id } },
+    // Cardinal-edge guy-outs (extend the four ground stakes outward)
+    { id: uid(), from: { type: 'anchor', id: 'r0c1' }, to: { type: 'position', position: [0, 0,  dCardZ + 0.7] } },
+    { id: uid(), from: { type: 'anchor', id: 'r2c1' }, to: { type: 'position', position: [0, 0, -dCardZ - 0.7] } },
+    { id: uid(), from: { type: 'anchor', id: 'r1c0' }, to: { type: 'position', position: [-dCardX - 0.7, 0, 0] } },
+    { id: uid(), from: { type: 'anchor', id: 'r1c2' }, to: { type: 'position', position: [ dCardX + 0.7, 0, 0] } },
+  ];
+
+  return { anchorPoints, poles: [pole], ropes };
+}
+
+// ─── Flat Roof (Sunshade / Parawing) ────────────────────────────────────────
+// Four corner poles hold the tarp horizontally above the ground – a sun- /
+// rain-tarp setup that you can stand under. The 4 corner anchors are pinned
+// at the pole tops; the 5 inner anchors are unpinned and follow the cloth
+// solver, which gives the typical mild centre droop of a horizontal tarp.
+function buildFlatRoof(w: number, l: number): PresetConfig {
+  const halfW = w / 2;
+  const halfL = l / 2;
+  const H = 2.0;                               // comfortable head-room
+
+  const anchorPoints = makeAnchors([
+    [[-halfW, H,  halfL], [0, H,  halfL], [halfW, H,  halfL]],
+    [[-halfW, H,  0    ], [0, H,  0    ], [halfW, H,  0    ]],
+    [[-halfW, H, -halfL], [0, H, -halfL], [halfW, H, -halfL]],
+  ]);
+
+  const polesArr: Pole[] = [
+    { id: uid(), basePosition: [-halfW,  halfL], height: H },
+    { id: uid(), basePosition: [ halfW,  halfL], height: H },
+    { id: uid(), basePosition: [-halfW, -halfL], height: H },
+    { id: uid(), basePosition: [ halfW, -halfL], height: H },
+  ];
+
+  const ropes: Rope[] = [
+    // Diagonal guy-out lines from each pole top — keep the masts upright
+    { id: uid(), from: { type: 'pole_top', id: polesArr[0].id }, to: { type: 'position', position: [-halfW - 0.8, 0,  halfL + 0.8] } },
+    { id: uid(), from: { type: 'pole_top', id: polesArr[1].id }, to: { type: 'position', position: [ halfW + 0.8, 0,  halfL + 0.8] } },
+    { id: uid(), from: { type: 'pole_top', id: polesArr[2].id }, to: { type: 'position', position: [-halfW - 0.8, 0, -halfL - 0.8] } },
+    { id: uid(), from: { type: 'pole_top', id: polesArr[3].id }, to: { type: 'position', position: [ halfW + 0.8, 0, -halfL - 0.8] } },
+  ];
+
+  return { anchorPoints, poles: polesArr, ropes };
+}
+
+// ─── Adirondack (Forester / open-front lean-to) ─────────────────────────────
+// Three-sided shelter: front edge raised on two poles (the *opening*), back
+// edge pegged to the ground. Geometry-wise this is the same fully-tensioned
+// slope as Lean-To, just mirrored across Z so the open side faces the
+// default camera instead of away from it.
+function buildAdirondack(w: number, l: number): PresetConfig {
+  const H  = Math.min(l * 0.5, 1.5);
+  const hh = Math.sqrt(l * l - H * H) / 2;
+  const hw = w / 2;
+
+  const anchorPoints = makeAnchors([
+    [[-hw, H,    hh],  [0, H,    hh],  [hw, H,    hh]],   // front  (HIGH – opening)
+    [[-hw, H/2,  0],   [0, H/2,  0],   [hw, H/2,  0]],    // middle (slope)
+    [[-hw, 0,   -hh],  [0, 0,   -hh],  [hw, 0,   -hh]],   // back   (ground – closed)
+  ]);
+
+  const pLeft:  Pole = { id: uid(), basePosition: [-hw, hh], height: H };
+  const pRight: Pole = { id: uid(), basePosition: [ hw, hh], height: H };
+
+  const ropes: Rope[] = [
+    // Front opening ridge between the two poles
+    { id: uid(), from: { type: 'pole_top', id: pLeft.id }, to: { type: 'pole_top', id: pRight.id } },
+    // Front guy-outs forward to keep the poles braced toward the opening
+    { id: uid(), from: { type: 'anchor', id: 'r0c0' }, to: { type: 'position', position: [-hw - 0.7, 0, hh + 0.5] } },
+    { id: uid(), from: { type: 'anchor', id: 'r0c2' }, to: { type: 'position', position: [ hw + 0.7, 0, hh + 0.5] } },
+    // Back ground pegs
+    { id: uid(), from: { type: 'anchor', id: 'r2c0' }, to: { type: 'position', position: [-hw, 0, -hh] } },
+    { id: uid(), from: { type: 'anchor', id: 'r2c2' }, to: { type: 'position', position: [ hw, 0, -hh] } },
+  ];
+
+  return { anchorPoints, poles: [pLeft, pRight], ropes };
+}
+
 export function buildPreset(preset: PresetType, width: number, length: number): PresetConfig {
   _id = 100; // reset to predictable IDs on each preset call
   switch (preset) {
-    case 'a-frame': return buildAFrame(width, length);
-    case 'lean-to': return buildLeanTo(width, length);
-    case 'diamond': return buildDiamond(width, length);
+    case 'a-frame':    return buildAFrame(width, length);
+    case 'lean-to':    return buildLeanTo(width, length);
+    case 'diamond':    return buildDiamond(width, length);
+    case 'pyramid':    return buildPyramid(width, length);
+    case 'flat-roof':  return buildFlatRoof(width, length);
+    case 'adirondack': return buildAdirondack(width, length);
   }
 }

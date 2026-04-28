@@ -19,9 +19,12 @@ const COLORS: { id: ColorVariant; label: string; swatch: string }[] = [
 ];
 
 const PRESETS: { id: PresetType; label: string }[] = [
-  { id: 'a-frame',  label: 'A-Frame' },
-  { id: 'lean-to',  label: 'Lean-To' },
-  { id: 'diamond',  label: 'Diamond' },
+  { id: 'a-frame',    label: 'A-Frame' },
+  { id: 'lean-to',    label: 'Lean-To' },
+  { id: 'adirondack', label: 'Adirondack' },
+  { id: 'diamond',    label: 'Diamond' },
+  { id: 'pyramid',    label: 'Pyramid' },
+  { id: 'flat-roof',  label: 'Flachdach' },
 ];
 
 export default function ControlPanel() {

@@ -3,7 +3,7 @@ import { buildPreset } from '../utils/presets';
 
 export type ColorVariant = 'olive' | 'sand' | 'flecktarn';
 export type CameraView = 'front' | 'back' | 'left' | 'right' | 'top' | 'free';
-export type PresetType = 'a-frame' | 'lean-to' | 'diamond';
+export type PresetType = 'a-frame' | 'lean-to' | 'diamond' | 'pyramid' | 'flat-roof' | 'adirondack';
 
 export interface AnchorPoint {
   id: string;
