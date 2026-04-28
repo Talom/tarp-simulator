@@ -1,28 +1,54 @@
 'use client';
-import { useRef, useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import * as THREE from 'three';
+import { useFrame } from '@react-three/fiber';
 import { useSimStore } from '../store/simulatorStore';
-import { createTarpGeometry, updateTarpGeometry, SUBDIVISIONS } from '../utils/geometry';
+import { createTarpGeometry, SUBDIVISIONS } from '../utils/geometry';
 import { getTarpTexture } from '../utils/textures';
+import {
+  createTarpPhysics,
+  bilinearInitialize,
+  setPinnedPositions,
+  stepPhysics,
+  TarpPhysicsState,
+} from '../utils/tarpPhysics';
+import { sharedPhysicsRef } from '../utils/sharedPhysicsRef';
 
 export default function Tarp() {
-  const anchorPoints = useSimStore((s) => s.anchorPoints);
-  const color = useSimStore((s) => s.tarp.color);
+  const tarpWidth      = useSimStore((s) => s.tarp.width);
+  const tarpLength     = useSimStore((s) => s.tarp.length);
+  const color          = useSimStore((s) => s.tarp.color);
+  const anchorPoints   = useSimStore((s) => s.anchorPoints);
+  const poles          = useSimStore((s) => s.poles);
+  const physicsVersion = useSimStore((s) => s.physicsVersion);
 
-  // Create geometry once and immediately populate it with the initial anchor positions.
-  const geometry = useMemo(() => {
-    const geo = createTarpGeometry(SUBDIVISIONS);
-    updateTarpGeometry(geo, anchorPoints, SUBDIVISIONS);
-    return geo;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // intentionally only on mount – updates handled by the effect below
+  const geometry  = useMemo(() => createTarpGeometry(SUBDIVISIONS), []);
+  const physicsRef = useRef<TarpPhysicsState | null>(null);
 
-  // Re-compute vertex positions whenever anchor points move.
+  // Full physics reset: dim change, preset apply, JSON import.
+  // bilinearInitialize seeds *all* particles to the new bilinear surface so
+  // there is no transient morph from the previous configuration.
   useEffect(() => {
-    updateTarpGeometry(geometry, anchorPoints, SUBDIVISIONS);
-  }, [anchorPoints, geometry]);
+    const phys = createTarpPhysics(tarpWidth, tarpLength);
+    bilinearInitialize(phys, anchorPoints);
+    setPinnedPositions(phys, anchorPoints, poles);
+    physicsRef.current = phys;
+    sharedPhysicsRef.current = phys;
 
-  // Procedural material – regenerated when the colour variant changes.
+    const posAttr = geometry.attributes.position as THREE.BufferAttribute;
+    (posAttr.array as Float32Array).set(phys.positions);
+    posAttr.needsUpdate = true;
+    geometry.computeVertexNormals();
+    // anchorPoints / poles intentionally omitted: re-init is triggered by physicsVersion.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tarpWidth, tarpLength, physicsVersion, geometry]);
+
+  // Re-evaluate pin status whenever anchors OR poles change. Pole moves can
+  // turn an anchor's previously-valid pin point into thin air (and vice versa).
+  useEffect(() => {
+    if (physicsRef.current) setPinnedPositions(physicsRef.current, anchorPoints, poles);
+  }, [anchorPoints, poles]);
+
   const material = useMemo(() => {
     const tex = getTarpTexture(color);
     return new THREE.MeshStandardMaterial({
@@ -32,6 +58,23 @@ export default function Tarp() {
       side: THREE.DoubleSide,
     });
   }, [color]);
+
+  // Cleanup the module-level reference on unmount so dangling readers don't see stale state.
+  useEffect(() => () => { sharedPhysicsRef.current = null; }, []);
+
+  useFrame((_, delta) => {
+    const phys = physicsRef.current;
+    if (!phys) return;
+
+    // Clamp dt for stability when frame rate drops; run a fixed inner sub-step.
+    const dt = Math.min(delta, 1 / 30);
+    stepPhysics(phys, dt);
+
+    const posAttr = geometry.attributes.position as THREE.BufferAttribute;
+    (posAttr.array as Float32Array).set(phys.positions);
+    posAttr.needsUpdate = true;
+    geometry.computeVertexNormals();
+  });
 
   return <mesh geometry={geometry} material={material} castShadow receiveShadow />;
 }

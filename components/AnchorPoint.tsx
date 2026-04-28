@@ -1,26 +1,26 @@
 'use client';
 import { useRef, useState, useCallback } from 'react';
 import * as THREE from 'three';
-import { ThreeEvent } from '@react-three/fiber';
+import { ThreeEvent, useFrame } from '@react-three/fiber';
 import { useSimStore, AnchorPoint } from '../store/simulatorStore';
 import { snapToGrid } from '../utils/geometry';
+import { isAnchorPinPoint, vertexIndexForAnchor } from '../utils/tarpPhysics';
+import { sharedPhysicsRef } from '../utils/sharedPhysicsRef';
 
 // ─── Drag-capture plane ──────────────────────────────────────────────────────
-// A large invisible mesh oriented so that e.point gives the world position
-// on the correct drag plane. Much simpler than manual raycasting.
 
 function getDragRotation(cameraView: string): [number, number, number] {
   switch (cameraView) {
     case 'top':
-      return [-Math.PI / 2, 0, 0]; // horizontal (XZ) plane
+      return [-Math.PI / 2, 0, 0];
     case 'front':
     case 'back':
-      return [0, 0, 0]; // vertical plane facing Z
+      return [0, 0, 0];
     case 'left':
     case 'right':
-      return [0, Math.PI / 2, 0]; // vertical plane facing X
+      return [0, Math.PI / 2, 0];
     default:
-      return [-Math.PI / 2, 0, 0]; // free → horizontal
+      return [-Math.PI / 2, 0, 0];
   }
 }
 
@@ -36,34 +36,22 @@ function DragCapturePlane({
   onEnd: () => void;
 }) {
   const rotation = getDragRotation(cameraView);
-  // Position the plane so it passes through the current anchor position.
   const position: [number, number, number] =
     cameraView === 'top' || cameraView === 'free'
       ? [0, anchorPos[1], 0]
       : cameraView === 'front' || cameraView === 'back'
       ? [0, 0, anchorPos[2]]
-      : [anchorPos[0], 0, 0]; // left / right
+      : [anchorPos[0], 0, 0];
 
   return (
     <mesh
       rotation={rotation}
       position={position}
-      onPointerMove={(e) => {
-        e.stopPropagation();
-        onMove(e.point.clone());
-      }}
-      onPointerUp={(e) => {
-        e.stopPropagation();
-        onEnd();
-      }}
+      onPointerMove={(e) => { e.stopPropagation(); onMove(e.point.clone()); }}
+      onPointerUp={(e) => { e.stopPropagation(); onEnd(); }}
     >
       <planeGeometry args={[500, 500]} />
-      <meshBasicMaterial
-        transparent
-        opacity={0}
-        depthWrite={false}
-        side={THREE.DoubleSide}
-      />
+      <meshBasicMaterial transparent opacity={0} depthWrite={false} side={THREE.DoubleSide} />
     </mesh>
   );
 }
@@ -76,23 +64,49 @@ interface AnchorSphereProps {
 
 export function AnchorSphere({ anchor }: AnchorSphereProps) {
   const setAnchorPosition = useSimStore((s) => s.setAnchorPosition);
-  const cameraView = useSimStore((s) => s.cameraView);
-  const snapGrid = useSimStore((s) => s.snapGrid);
+  const cameraView        = useSimStore((s) => s.cameraView);
+  const snapGrid          = useSimStore((s) => s.snapGrid);
   const setDraggingAnchor = useSimStore((s) => s.setDraggingAnchor);
+  const tarpWidth         = useSimStore((s) => s.tarp.width);
+  const tarpLength        = useSimStore((s) => s.tarp.length);
+  const poles             = useSimStore((s) => s.poles);
 
-  const [hovered, setHovered] = useState(false);
+  const [hovered, setHovered]   = useState(false);
   const [dragging, setDragging] = useState(false);
+
+  // An anchor that doesn't sit on the ground or on a pole top is "in the air"
+  // and physics-driven. Its world position comes from the cloth solver, not
+  // the store, and the user can't drag it.
+  const pinned = isAnchorPinPoint(anchor.position, poles);
+  const vIdx   = vertexIndexForAnchor(anchor.id);
 
   const posRef = useRef<[number, number, number]>(anchor.position);
   posRef.current = anchor.position;
 
+  const meshRef = useRef<THREE.Mesh | null>(null);
+
+  // For unpinned anchors, follow the live cloth vertex every frame.
+  useFrame(() => {
+    if (pinned || !meshRef.current || vIdx < 0) return;
+    const phys = sharedPhysicsRef.current;
+    if (!phys) return;
+    const k = vIdx * 3;
+    meshRef.current.position.set(
+      phys.positions[k],
+      phys.positions[k + 1],
+      phys.positions[k + 2],
+    );
+  });
+
   const startDrag = useCallback(
     (e: ThreeEvent<PointerEvent>) => {
+      if (cameraView === 'free') return;
+      if (!pinned) return; // cannot grab in-air anchors – they belong to the cloth
       e.stopPropagation();
       setDragging(true);
       setDraggingAnchor(anchor.id);
     },
-    [anchor.id, setDraggingAnchor],
+    [anchor.id, cameraView, pinned, setDraggingAnchor],
   );
 
   const endDrag = useCallback(() => {
@@ -107,30 +121,54 @@ export function AnchorSphere({ anchor }: AnchorSphereProps) {
       let ny = cur[1];
       let nz = cur[2];
 
+      const halfW = tarpWidth  / 2;
+      const halfL = tarpLength / 2;
+
+      // Valid Y positions: ground (0) or any existing pole top
+      const validY = [0, ...poles.map((p) => p.height)];
+      const snapY = (raw: number) =>
+        validY.reduce((best, y) => (Math.abs(y - raw) < Math.abs(best - raw) ? y : best));
+
       switch (cameraView) {
         case 'top':
-        case 'free':
           nx = snapToGrid(pt.x, snapGrid);
           nz = snapToGrid(pt.z, snapGrid);
           break;
         case 'front':
         case 'back':
           nx = snapToGrid(pt.x, snapGrid);
-          ny = snapToGrid(Math.max(0, pt.y), snapGrid);
+          ny = snapY(pt.y);
           break;
         case 'left':
         case 'right':
           nz = snapToGrid(pt.z, snapGrid);
-          ny = snapToGrid(Math.max(0, pt.y), snapGrid);
+          ny = snapY(pt.y);
           break;
       }
 
+      nx = Math.max(-halfW, Math.min(halfW, nx));
+      nz = Math.max(-halfL, Math.min(halfL, nz));
+
       setAnchorPosition(anchor.id, [nx, ny, nz]);
     },
-    [cameraView, anchor.id, snapGrid, setAnchorPosition],
+    [cameraView, anchor.id, snapGrid, tarpWidth, tarpLength, poles, setAnchorPosition],
   );
 
-  const [px, py, pz] = anchor.position;
+  // Visual styling
+  // ─ unpinned (in-air): small, dim grey – informational only
+  // ─ pinned, free view: medium grey – non-interactive in 3D mode
+  // ─ pinned, fixed view: red / yellow / orange (interactive)
+  const radius   = pinned ? 0.07 : 0.04;
+  const color    = !pinned                ? '#5a5a5a'
+                 : cameraView === 'free'  ? '#888888'
+                 : dragging               ? '#ff8800'
+                 : hovered                ? '#ffcc44'
+                 :                          '#ff4444';
+  const emissive = !pinned                ? '#1a1a1a'
+                 : cameraView === 'free'  ? '#222222'
+                 : dragging               ? '#aa4400'
+                 : hovered                ? '#664400'
+                 :                          '#330000';
 
   return (
     <>
@@ -144,15 +182,16 @@ export function AnchorSphere({ anchor }: AnchorSphereProps) {
       )}
 
       <mesh
-        position={[px, py, pz]}
+        ref={meshRef}
+        position={anchor.position}
         onPointerDown={startDrag}
-        onPointerOver={(e) => { e.stopPropagation(); setHovered(true); }}
-        onPointerOut={() => setHovered(false)}
+        onPointerOver={pinned ? (e) => { e.stopPropagation(); setHovered(true); } : undefined}
+        onPointerOut={pinned ? () => setHovered(false) : undefined}
       >
-        <sphereGeometry args={[0.07, 12, 12]} />
+        <sphereGeometry args={[radius, 12, 12]} />
         <meshStandardMaterial
-          color={dragging ? '#ff8800' : hovered ? '#ffcc44' : '#ff4444'}
-          emissive={dragging ? '#aa4400' : hovered ? '#664400' : '#330000'}
+          color={color}
+          emissive={emissive}
           emissiveIntensity={0.4}
           roughness={0.3}
           metalness={0.5}

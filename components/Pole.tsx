@@ -29,9 +29,10 @@ function PoleDragPlane({
 }
 
 function PoleObject({ pole }: { pole: PoleData }) {
-  const setPoleBase = useSimStore((s) => s.setPoleBase);
-  const setDraggingPole = useSimStore((s) => s.setDraggingPole);
-  const snapGrid = useSimStore((s) => s.snapGrid);
+  const setPoleBase      = useSimStore((s) => s.setPoleBase);
+  const setDraggingPole  = useSimStore((s) => s.setDraggingPole);
+  const snapGrid         = useSimStore((s) => s.snapGrid);
+  const cameraView       = useSimStore((s) => s.cameraView);
 
   const [hovered, setHovered] = useState(false);
   const [dragging, setDragging] = useState(false);
@@ -43,6 +44,7 @@ function PoleObject({ pole }: { pole: PoleData }) {
   const midY = pole.height / 2;
 
   const onPointerDown = (e: ThreeEvent<PointerEvent>) => {
+    if (cameraView === 'free') return;
     e.stopPropagation();
     setDragging(true);
     setDraggingPole(pole.id);

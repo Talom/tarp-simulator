@@ -45,6 +45,9 @@ export interface SimulatorState {
   draggingAnchorId: string | null;
   draggingPoleId: string | null;
   snapGrid: number; // metres
+  // Increments when the cloth state should be re-initialised from scratch
+  // (preset apply, dimension change, JSON import). Tarp.tsx watches this.
+  physicsVersion: number;
 
   // Actions
   setTarpConfig: (cfg: Partial<TarpConfig>) => void;
@@ -99,6 +102,7 @@ export const useSimStore = create<SimulatorState>((set, get) => ({
   draggingAnchorId: null,
   draggingPoleId: null,
   snapGrid: 0.25,
+  physicsVersion: 0,
 
   setTarpConfig: (cfg) =>
     set((s) => {
@@ -110,7 +114,7 @@ export const useSimStore = create<SimulatorState>((set, get) => ({
         ...a,
         position: [a.position[0] * scaleX, a.position[1], a.position[2] * scaleZ] as [number, number, number],
       }));
-      return { tarp: next, anchorPoints: anchors };
+      return { tarp: next, anchorPoints: anchors, physicsVersion: s.physicsVersion + 1 };
     }),
 
   setAnchorPosition: (id, pos) =>
@@ -152,9 +156,9 @@ export const useSimStore = create<SimulatorState>((set, get) => ({
   toggleControlPanel: () => set((s) => ({ controlPanelOpen: !s.controlPanelOpen })),
 
   applyPreset: (preset) => {
-    const { tarp } = get();
+    const { tarp, physicsVersion } = get();
     const { anchorPoints, poles, ropes } = buildPreset(preset, tarp.width, tarp.length);
-    set({ anchorPoints, poles, ropes, selectedPreset: preset });
+    set({ anchorPoints, poles, ropes, selectedPreset: preset, physicsVersion: physicsVersion + 1 });
   },
 
   setDraggingAnchor: (id) => set({ draggingAnchorId: id }),
@@ -168,13 +172,14 @@ export const useSimStore = create<SimulatorState>((set, get) => ({
   importJSON: (json) => {
     try {
       const data = JSON.parse(json);
-      set({
+      set((s) => ({
         tarp: data.tarp,
         anchorPoints: data.anchorPoints,
         poles: data.poles,
         ropes: data.ropes,
         selectedPreset: null,
-      });
+        physicsVersion: s.physicsVersion + 1,
+      }));
     } catch {
       console.error('Invalid JSON');
     }
