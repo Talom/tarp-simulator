@@ -6,7 +6,6 @@ import { useSimStore, AnchorPoint } from '../store/simulatorStore';
 import { snapToGrid } from '../utils/geometry';
 import { isAnchorPinPoint, vertexIndexForAnchor } from '../utils/tarpPhysics';
 import { sharedPhysicsRef } from '../utils/sharedPhysicsRef';
-import { Html } from '@react-three/drei'; // Falls installiert, sonst normales div + absolute positioning
 
 // ─── Drag-capture plane ──────────────────────────────────────────────────────
 
@@ -203,94 +202,7 @@ export function AnchorSphere({ anchor }: AnchorSphereProps) {
     </>
   );
 
-  // Neuer State für das Kontextmenü
-  const [contextMenu, setContextMenu] = useState<{ x: number, y: number } | null>(null);
-
-  const handleContextMenu = useCallback((e: ThreeEvent<MouseEvent>) => {
-    e.stopPropagation();
-    // Verhindert das Standard-Browser-Menü
-    e.nativeEvent.preventDefault(); 
     
-    // Setzt die Position basierend auf dem Klick-Event
-    setContextMenu({
-      x: e.nativeEvent.clientX,
-      y: e.nativeEvent.clientY
-    });
-  }, []);
-
-  // Schließt das Menü bei Klick irgendwo anders
-  const closeMenu = () => setContextMenu(null);
-
-  return (
-    <>
-      {/* ... DragCapturePlane ... */}
-
-      <mesh
-        ref={meshRef}
-        position={anchor.position}
-        onPointerDown={startDrag}
-        onContextMenu={handleContextMenu} // <--- Rechtsklick-Event
-        onPointerOver={pinned ? (e) => { e.stopPropagation(); setHovered(true); } : undefined}
-        onPointerOut={pinned ? () => setHovered(false) : undefined}
-      >
-        <sphereGeometry args={[radius, 12, 12]} />
-        <meshStandardMaterial
-          color={color}
-          emissive={emissive}
-          emissiveIntensity={0.4}
-        />
-      </mesh>
-
-      {/* Das Menü Overlay */}
-      {contextMenu && (
-        <Html fullscreen>
-          <div 
-            style={{
-              position: 'absolute',
-              top: contextMenu!.y,
-              left: contextMenu!.x,
-              background: '#222',
-              color: 'white',
-              border: '1px solid #444',
-              borderRadius: '4px',
-              padding: '8px 0',
-              zIndex: 1000,
-              boxShadow: '0 4px 10px rgba(0,0,0,0.5)',
-              minWidth: '120px'
-            }}
-            onClick={closeMenu}
-            onMouseLeave={closeMenu}
-          >
-            <div 
-              style={{ 
-                padding: '4px 12px', 
-                cursor: 'pointer',
-                transition: 'background 0.2s' // Ein wenig Smoothing für den Effekt
-              }}
-              onClick={() => console.log('Löschen', anchor.id)}
-              onMouseEnter={(e) => (e.currentTarget.style.background = '#333')}
-              onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
-            >
-              Löschen
-            </div>
-            <div 
-              style={{ 
-                padding: '4px 12px', 
-                cursor: 'pointer',
-                transition: 'background 0.2s'
-              }}
-              onClick={() => console.log('Eigenschaften', anchor.id)}
-              onMouseEnter={(e) => (e.currentTarget.style.background = '#333')}
-              onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
-            >
-              Eigenschaften
-            </div>
-          </div>
-        </Html>
-      )}
-    </>
-  );
-
 }
 
 export default function AnchorPoints() {
