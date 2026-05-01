@@ -34,6 +34,16 @@ export interface TarpConfig {
   color: ColorVariant;
 }
 
+export type ContextMenuTarget =
+  | { type: 'anchor'; id: string }
+  | { type: 'pole';   id: string };
+
+export interface ContextMenuState {
+  target: ContextMenuTarget;
+  x: number; // viewport pixels
+  y: number;
+}
+
 export interface SimulatorState {
   tarp: TarpConfig;
   anchorPoints: AnchorPoint[];
@@ -48,6 +58,7 @@ export interface SimulatorState {
   // Increments when the cloth state should be re-initialised from scratch
   // (preset apply, dimension change, JSON import). Tarp.tsx watches this.
   physicsVersion: number;
+  contextMenu: ContextMenuState | null;
 
   // Actions
   setTarpConfig: (cfg: Partial<TarpConfig>) => void;
@@ -65,7 +76,18 @@ export interface SimulatorState {
   setDraggingPole: (id: string | null) => void;
   exportJSON: () => string;
   importJSON: (json: string) => void;
+  openContextMenu: (target: ContextMenuTarget, x: number, y: number) => void;
+  closeContextMenu: () => void;
+  attachAnchorToNearestFixpoint: (anchorId: string) => void;
+  detachAnchorFromFixpoint: (anchorId: string) => void;
+  attachNearestAnchorToPole: (poleId: string) => void;
+  detachAnchorsFromPole: (poleId: string) => void;
 }
+
+// Vertical lift used for "detach" – needs to be larger than PIN_EPS (0.02 m)
+// so the anchor leaves the fixpoint unambiguously and the cloth solver
+// takes over.
+const DETACH_LIFT = 0.5;
 
 let nextId = 1;
 const uid = () => `${nextId++}`;
@@ -103,6 +125,7 @@ export const useSimStore = create<SimulatorState>((set, get) => ({
   draggingPoleId: null,
   snapGrid: 0.25,
   physicsVersion: 0,
+  contextMenu: null,
 
   setTarpConfig: (cfg) =>
     set((s) => {
@@ -184,4 +207,113 @@ export const useSimStore = create<SimulatorState>((set, get) => ({
       console.error('Invalid JSON');
     }
   },
+
+  openContextMenu: (target, x, y) => set({ contextMenu: { target, x, y } }),
+  closeContextMenu: () => set({ contextMenu: null }),
+
+  // Snap an anchor to its nearest fixpoint: either the ground (Y=0 at the
+  // anchor's current X,Z) or the top of the closest pole, whichever is
+  // closer in 3D space. The cloth solver will pin the anchor there on the
+  // next setPinnedPositions pass.
+  attachAnchorToNearestFixpoint: (anchorId) =>
+    set((s) => {
+      const anchor = s.anchorPoints.find((a) => a.id === anchorId);
+      if (!anchor) return {};
+      const [ax, ay, az] = anchor.position;
+
+      const candidates: { pos: [number, number, number]; dist2: number }[] = [];
+
+      // Ground projection at the same X,Z
+      {
+        const dy = ay - 0;
+        candidates.push({ pos: [ax, 0, az], dist2: dy * dy });
+      }
+
+      // Each pole top
+      for (const p of s.poles) {
+        const px = p.basePosition[0];
+        const pz = p.basePosition[1];
+        const py = p.height;
+        const dx = ax - px;
+        const dy = ay - py;
+        const dz = az - pz;
+        candidates.push({ pos: [px, py, pz], dist2: dx * dx + dy * dy + dz * dz });
+      }
+
+      let best = candidates[0];
+      for (const c of candidates) if (c.dist2 < best.dist2) best = c;
+
+      return {
+        anchorPoints: s.anchorPoints.map((a) =>
+          a.id === anchorId ? { ...a, position: best.pos } : a,
+        ),
+      };
+    }),
+
+  // Lift the anchor off whatever fixpoint it sits on so isAnchorPinPoint
+  // returns false and the cloth solver decides where it ends up.
+  detachAnchorFromFixpoint: (anchorId) =>
+    set((s) => ({
+      anchorPoints: s.anchorPoints.map((a) =>
+        a.id === anchorId
+          ? {
+              ...a,
+              position: [a.position[0], a.position[1] + DETACH_LIFT, a.position[2]],
+            }
+          : a,
+      ),
+    })),
+
+  // Find the closest anchor (by 3D distance to the pole top) and snap it
+  // to the pole top. Anchors already pinned to this pole are skipped.
+  attachNearestAnchorToPole: (poleId) =>
+    set((s) => {
+      const pole = s.poles.find((p) => p.id === poleId);
+      if (!pole) return {};
+      const top: [number, number, number] = [pole.basePosition[0], pole.height, pole.basePosition[1]];
+
+      let bestId: string | null = null;
+      let bestDist2 = Infinity;
+      for (const a of s.anchorPoints) {
+        const dx = a.position[0] - top[0];
+        const dy = a.position[1] - top[1];
+        const dz = a.position[2] - top[2];
+        const d2 = dx * dx + dy * dy + dz * dz;
+        // Skip if already at this pole top
+        if (d2 < 1e-6) continue;
+        if (d2 < bestDist2) {
+          bestDist2 = d2;
+          bestId = a.id;
+        }
+      }
+      if (!bestId) return {};
+
+      return {
+        anchorPoints: s.anchorPoints.map((a) =>
+          a.id === bestId ? { ...a, position: top } : a,
+        ),
+      };
+    }),
+
+  // Lift every anchor currently pinned to this pole top off, so the pole
+  // is "free" again.
+  detachAnchorsFromPole: (poleId) =>
+    set((s) => {
+      const pole = s.poles.find((p) => p.id === poleId);
+      if (!pole) return {};
+      const top: [number, number, number] = [pole.basePosition[0], pole.height, pole.basePosition[1]];
+      return {
+        anchorPoints: s.anchorPoints.map((a) => {
+          const dx = a.position[0] - top[0];
+          const dy = a.position[1] - top[1];
+          const dz = a.position[2] - top[2];
+          // Within ~1 cm of the pole top counts as "attached" here.
+          if (dx * dx + dy * dy + dz * dz > 1e-4) return a;
+          return {
+            ...a,
+            position: [a.position[0], a.position[1] + DETACH_LIFT, a.position[2]] as [number, number, number],
+          };
+        }),
+      };
+    }),
 }));

@@ -33,6 +33,7 @@ function PoleObject({ pole }: { pole: PoleData }) {
   const setDraggingPole  = useSimStore((s) => s.setDraggingPole);
   const snapGrid         = useSimStore((s) => s.snapGrid);
   const cameraView       = useSimStore((s) => s.cameraView);
+  const openContextMenu  = useSimStore((s) => s.openContextMenu);
 
   const [hovered, setHovered] = useState(false);
   const [dragging, setDragging] = useState(false);
@@ -44,10 +45,18 @@ function PoleObject({ pole }: { pole: PoleData }) {
   const midY = pole.height / 2;
 
   const onPointerDown = (e: ThreeEvent<PointerEvent>) => {
+    // Only left-click starts a drag – right-click is for the context menu.
+    if (e.nativeEvent.button !== 0) return;
     if (cameraView === 'free') return;
     e.stopPropagation();
     setDragging(true);
     setDraggingPole(pole.id);
+  };
+
+  const onContextMenu = (e: ThreeEvent<MouseEvent>) => {
+    e.stopPropagation();
+    e.nativeEvent.preventDefault();
+    openContextMenu({ type: 'pole', id: pole.id }, e.nativeEvent.clientX, e.nativeEvent.clientY);
   };
 
   const onMove = (x: number, z: number) => {
@@ -70,6 +79,7 @@ function PoleObject({ pole }: { pole: PoleData }) {
         position={[0, midY, 0]}
         castShadow
         onPointerDown={onPointerDown}
+        onContextMenu={onContextMenu}
         onPointerOver={(e) => { e.stopPropagation(); setHovered(true); }}
         onPointerOut={() => setHovered(false)}
       >
@@ -82,7 +92,7 @@ function PoleObject({ pole }: { pole: PoleData }) {
       </mesh>
 
       {/* Top cap */}
-      <mesh position={[0, pole.height, 0]}>
+      <mesh position={[0, pole.height, 0]} onContextMenu={onContextMenu}>
         <sphereGeometry args={[0.04, 8, 8]} />
         <meshStandardMaterial color="#c8a050" roughness={0.4} metalness={0.5} />
       </mesh>

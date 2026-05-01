@@ -70,6 +70,7 @@ export function AnchorSphere({ anchor }: AnchorSphereProps) {
   const tarpWidth         = useSimStore((s) => s.tarp.width);
   const tarpLength        = useSimStore((s) => s.tarp.length);
   const poles             = useSimStore((s) => s.poles);
+  const openContextMenu   = useSimStore((s) => s.openContextMenu);
 
   const [hovered, setHovered]   = useState(false);
   const [dragging, setDragging] = useState(false);
@@ -102,6 +103,8 @@ export function AnchorSphere({ anchor }: AnchorSphereProps) {
 
   const startDrag = useCallback(
     (e: ThreeEvent<PointerEvent>) => {
+      // Only left-click drags – right-click is for the context menu.
+      if (e.nativeEvent.button !== 0) return;
       if (cameraView === 'free') return;
       if (!pinned) return; // cannot grab in-air anchors – they belong to the cloth
       e.stopPropagation();
@@ -109,6 +112,15 @@ export function AnchorSphere({ anchor }: AnchorSphereProps) {
       setDraggingAnchor(anchor.id);
     },
     [anchor.id, cameraView, pinned, setDraggingAnchor],
+  );
+
+  const onContextMenu = useCallback(
+    (e: ThreeEvent<MouseEvent>) => {
+      e.stopPropagation();
+      e.nativeEvent.preventDefault();
+      openContextMenu({ type: 'anchor', id: anchor.id }, e.nativeEvent.clientX, e.nativeEvent.clientY);
+    },
+    [anchor.id, openContextMenu],
   );
 
   const endDrag = useCallback(() => {
@@ -187,6 +199,7 @@ export function AnchorSphere({ anchor }: AnchorSphereProps) {
         ref={meshRef}
         position={anchor.position}
         onPointerDown={startDrag}
+        onContextMenu={onContextMenu}
         onPointerOver={pinned ? (e) => { e.stopPropagation(); setHovered(true); } : undefined}
         onPointerOut={pinned ? () => setHovered(false) : undefined}
       >
