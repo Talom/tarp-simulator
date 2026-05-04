@@ -87,9 +87,16 @@ export function AnchorSphere({ anchor }: AnchorSphereProps) {
 
   const meshRef = useRef<THREE.Mesh | null>(null);
 
-  // For unpinned anchors, follow the live cloth vertex every frame.
+  // Side views can edit Y (snap to ground / pole height) → re-pinning works.
+  // Top view can only edit X/Z, so an unpinned anchor cannot be re-pinned there.
+  const draggable =
+    cameraView !== 'free' && (pinned || cameraView !== 'top');
+
+  // Unpinned anchors visually track the live cloth vertex — except while the
+  // user is actively dragging one, in which case the React-driven `position`
+  // prop (= the store position being updated by the drag) takes over.
   useFrame(() => {
-    if (pinned || !meshRef.current || vIdx < 0) return;
+    if (pinned || dragging || !meshRef.current || vIdx < 0) return;
     const phys = sharedPhysicsRef.current;
     if (!phys) return;
     const k = vIdx * 3;
@@ -102,13 +109,24 @@ export function AnchorSphere({ anchor }: AnchorSphereProps) {
 
   const startDrag = useCallback(
     (e: ThreeEvent<PointerEvent>) => {
-      if (cameraView === 'free') return;
-      if (!pinned) return; // cannot grab in-air anchors – they belong to the cloth
+      if (!draggable) return;
       e.stopPropagation();
+
+      // Unpinned: the store position can drift far from the *visual* (physics)
+      // position. Sync it before the drag begins so the drag-capture plane is
+      // placed where the user actually clicked.
+      if (!pinned && vIdx >= 0 && sharedPhysicsRef.current) {
+        const k = vIdx * 3;
+        const pos = sharedPhysicsRef.current.positions;
+        const newPos: [number, number, number] = [pos[k], pos[k + 1], pos[k + 2]];
+        setAnchorPosition(anchor.id, newPos);
+        posRef.current = newPos;
+      }
+
       setDragging(true);
       setDraggingAnchor(anchor.id);
     },
-    [anchor.id, cameraView, pinned, setDraggingAnchor],
+    [anchor.id, draggable, pinned, vIdx, setAnchorPosition, setDraggingAnchor],
   );
 
   const endDrag = useCallback(() => {
@@ -157,20 +175,22 @@ export function AnchorSphere({ anchor }: AnchorSphereProps) {
   );
 
   // Visual styling
-  // ─ unpinned (in-air): small, dim grey – informational only
-  // ─ pinned, free view: medium grey – non-interactive in 3D mode
-  // ─ pinned, fixed view: red / yellow / orange (interactive)
-  const radius   = pinned ? 0.07 : 0.04;
-  const color    = !pinned                ? '#5a5a5a'
-                 : cameraView === 'free'  ? '#888888'
-                 : dragging               ? '#ff8800'
-                 : hovered                ? '#ffcc44'
-                 :                          '#ff4444';
-  const emissive = !pinned                ? '#1a1a1a'
-                 : cameraView === 'free'  ? '#222222'
-                 : dragging               ? '#aa4400'
-                 : hovered                ? '#664400'
-                 :                          '#330000';
+  // ─ Unpinned & idle:        small dim grey (informational, but grabbable)
+  // ─ Unpinned & hover/drag:  full size, interactive colours
+  // ─ Pinned in free view:    medium grey (no interaction in 3D)
+  // ─ Pinned in fixed view:   red / yellow / orange (interactive)
+  const interactive = draggable && (hovered || dragging);
+  const radius   = pinned || interactive ? 0.07 : 0.04;
+  const color    = !pinned && !interactive ? '#5a5a5a'
+                 : cameraView === 'free'   ? '#888888'
+                 : dragging                ? '#ff8800'
+                 : hovered                 ? '#ffcc44'
+                 :                           '#ff4444';
+  const emissive = !pinned && !interactive ? '#1a1a1a'
+                 : cameraView === 'free'   ? '#222222'
+                 : dragging                ? '#aa4400'
+                 : hovered                 ? '#664400'
+                 :                           '#330000';
 
   return (
     <>
@@ -187,8 +207,8 @@ export function AnchorSphere({ anchor }: AnchorSphereProps) {
         ref={meshRef}
         position={anchor.position}
         onPointerDown={startDrag}
-        onPointerOver={pinned ? (e) => { e.stopPropagation(); setHovered(true); } : undefined}
-        onPointerOut={pinned ? () => setHovered(false) : undefined}
+        onPointerOver={draggable ? (e) => { e.stopPropagation(); setHovered(true); } : undefined}
+        onPointerOut={draggable ? () => setHovered(false) : undefined}
       >
         <sphereGeometry args={[radius, 12, 12]} />
         <meshStandardMaterial
